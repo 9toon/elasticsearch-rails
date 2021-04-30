@@ -155,6 +155,47 @@ describe Elasticsearch::Model::Importing do
       end
     end
 
+    context 'when the method is called with the http_compress option' do
+
+      before do
+        dummy_batch = [{ foo: 'bar' }]
+        expect(DummyImportingModel).to receive(:__find_in_batches).with(foo: 'bar').and_yield(dummy_batch)
+        expect(DummyImportingModel).to receive(:__batch_to_bulk).with(dummy_batch, anything).and_call_original
+      end
+
+      context 'when elasticsearch-transport version is >= 7.2.0' do
+
+        before do
+          Elasticsearch::Transport::VERSION = '7.2.0'
+
+          expect(DummyImportingModel).to receive(:client).and_return(client)
+          expect(DummyImportingModel).to receive(:__compress).and_return(true)
+          expect(client).to receive(:bulk).with(hash_including(headers: { 'Content-Encoding' => 'gzip' }))
+        end
+
+        it 'compresses the request body' do
+          expect(DummyImportingModel.import(http_compress: true, foo: 'bar')).to eq(0)
+        end
+      end
+
+      context 'when elasticsearch-transport version is < 7.2.0' do
+
+        before do
+          Elasticsearch::Transport::VERSION = '7.1.0'
+        end
+
+        it 'compresses the request body' do
+          expect { DummyImportingModel.import(http_compress: true, foo: 'bar') }.to raise_error(ArgumentError)
+        end
+
+        it 'raises an error' do
+          expect {
+            DummyImportingModel.import(http_compress: true, foo: 'bar')
+          }.to raise_exception(ArgumentError)
+        end
+      end
+    end
+
     context 'when a different index name is provided' do
 
       before do

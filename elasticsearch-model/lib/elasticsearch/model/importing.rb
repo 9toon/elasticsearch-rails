@@ -99,6 +99,10 @@ module Elasticsearch
         #
         #    Article.import refresh: true
         #
+        # @example Use gzip compression
+        #
+        #    Article.import http_compress: true
+        #
         # @example Import the records into a different index/type than the default one
         #
         #    Article.import index: 'my-new-index', type: 'my-other-type'
@@ -138,13 +142,14 @@ module Elasticsearch
         #    Article.import return: 'errors'
         #
         def import(options={}, &block)
-          errors       = []
-          refresh      = options.delete(:refresh)   || false
-          target_index = options.delete(:index)     || index_name
-          target_type  = options.delete(:type)      || document_type
-          transform    = options.delete(:transform) || __transform
-          pipeline     = options.delete(:pipeline)
-          return_value = options.delete(:return)    || 'count'
+          errors        = []
+          refresh       = options.delete(:refresh)       || false
+          target_index  = options.delete(:index)         || index_name
+          target_type   = options.delete(:type)          || document_type
+          transform     = options.delete(:transform)     || __transform
+          pipeline      = options.delete(:pipeline)
+          return_value  = options.delete(:return)        || 'count'
+          http_compress = options.delete(:http_compress) || false
 
           unless transform.respond_to?(:call)
             raise ArgumentError,
@@ -165,6 +170,16 @@ module Elasticsearch
               body:  __batch_to_bulk(batch, transform)
             }
 
+            if http_compress
+              if Gem::Version.create(::Elasticsearch::Transport::VERSION) < Gem::Version.create("7.2.0")
+                raise ArgumentError,
+                      "http_compress option is only available with the elasticsearch-transport gem 7.2.0 or later."
+              end
+
+              params[:body] = __compress(Elasticsearch::API::Utils.__bulkify(params[:body]))
+              params[:headers] = { 'Content-Encoding' => 'gzip' }
+            end
+
             params[:pipeline] = pipeline if pipeline
 
             response = client.bulk params
@@ -182,6 +197,14 @@ module Elasticsearch
             else
               errors.size
           end
+        end
+
+        def __compress(string)
+          wio = StringIO.new("w")
+          w_gz = Zlib::GzipWriter.new(wio, strategy = Zlib::DEFAULT_COMPRESSION)
+          w_gz.write(string)
+          w_gz.close
+          wio.string
         end
 
         def __batch_to_bulk(batch, transform)
